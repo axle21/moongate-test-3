@@ -5,12 +5,12 @@ import { SiweMessage } from "siwe";
 import { useAccount, useDisconnect, useSignMessage } from "wagmi";
 
 const ConnectWalletButton = ({
-  className: className = "",
+  className = "",
   children,
   disabled,
-  onClick: onClick = () => {},
-  onSuccess: onSuccess = () => {},
-  onError: onError = () => {},
+  onClick = () => {},
+  onSuccess = () => {},
+  onError = () => {},
 }: {
   name?: string;
   disabled?: boolean;
@@ -29,6 +29,23 @@ const ConnectWalletButton = ({
   const [showConfirmAddress, setShowConfirmAddress] = useState(false);
   const [active, setActive] = useState(false);
 
+  const verifySignature = async (
+    message: SiweMessage,
+    signature: string,
+    nonce: string
+  ): Promise<boolean> => {
+    try {
+      await message.verify({
+        signature,
+        nonce,
+      });
+      return true; // Verification successful
+    } catch (error) {
+      console.error("Verification failed:", error);
+      return false; // Verification failed
+    }
+  };
+
   const {
     data: signature,
     isSuccess: isSigned,
@@ -37,47 +54,47 @@ const ConnectWalletButton = ({
   } = useSignMessage();
 
   useEffect(() => {
-    disconnect();
-  }, []);
-
-  const verifySignature = async (
-    message: SiweMessage,
-    signature: string,
-    nonce: string
-  ) => {
-    try {
-      await message.verify({
-        signature,
-        nonce,
+    if (isSigned && message && signature) {
+      verifySignature(message, signature, nonce).then((verified) => {
+        if (verified) {
+          onSuccess(message, signature);
+        } else {
+          onError();
+        }
       });
-      return true;
-    } catch (error) {
-      return false;
     }
-  };
+  }, [isSigned, message, signature, onSuccess, onError]);
 
-  const reset = () => {
-    setShowConfirmAddress(false);
-    setWalletDialog(null);
-    setMessage(null);
-    setNonce("");
-  };
+  const handleSignMessage = async (): Promise<SiweMessage | null> => {
+    if (!address) return null;
 
-  const cancel = () => {
-    reset();
-    disconnect();
-  };
+    const newNonce = Math.floor(Math.random() * 1000000).toString();
+    setNonce(newNonce);
+    const newMessage = new SiweMessage({
+      domain: window.location.host,
+      address,
+      statement: "Please sign this message to confirm your identity.",
+      uri: window.location.origin,
+      version: "1",
+      chainId: 1,
+      nonce: newNonce,
+    });
 
-  const handleSignMessage = async (
-    address?: string
-  ): Promise<SiweMessage | null> => {
-    return null;
+    setMessage(newMessage);
+    signMessage({ message: newMessage.prepareMessage() });
+    return newMessage;
   };
 
   const handleOpenConnectModal = (
     connected: boolean,
     openConnectModal: () => void
-  ) => {};
+  ) => {
+    if (!connected) {
+      openConnectModal();
+    } else {
+      handleSignMessage();
+    }
+  };
 
   return (
     <>
@@ -91,13 +108,14 @@ const ConnectWalletButton = ({
                 variant='ghost'
                 className={"min-w-fit " + className}
                 onClick={() => {
+                  onClick();
                   handleOpenConnectModal(
                     connected || isConnected,
                     openConnectModal
                   );
                 }}
                 isDisabled={disabled}
-                isLoading={active && (isConnecting || !ready)}
+                isLoading={active && (!ready || isConnecting)}
                 padding={0}>
                 {children}
               </Button>
